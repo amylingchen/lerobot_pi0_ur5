@@ -1,6 +1,6 @@
 ###  上传文件到服务器
 
-scp -i ~/.ssh/{ssh公钥} -r  "/d:{本地文件地址}"  lxc4866@ssh.rvlab.app:{project_path}/datasets/ur5/original/
+scp -i ~/.ssh/{ssh公钥} -r  "/d:{本地文件地址}"  username@server:{project_path}/datasets/ur5/original/
 
 
 ### 转换文件为lerobot v21格式

@@ -97,7 +97,7 @@ def get_feature_stats_img(array: np.ndarray, axis: tuple, keepdims: bool) -> dic
         "count": np.array([len(array)]),
     }
 
-mypath = os.path.join(project_root, "datasets/ur5/outputs/data", "chunk_000")
+mypath = os.path.join(project_root, "mydatasets/ur5/outputs/data", "chunk_000")
 onlyfiles = [f for f in listdir(mypath) if isfile(join(mypath, f))]
 onlyfiles.sort()
 
@@ -112,7 +112,7 @@ for file in onlyfiles:
     episode_dic['stats'] = {}
 
     # converting mp4 file into images and store it into a temporary folder
-    observation_image_path =os.path.join(project_root, "datasets/ur5/outputs/videos", "chunk_000","observation.images.image")
+    observation_image_path =os.path.join(project_root, "mydatasets/ur5/outputs/videos", "chunk_000","observation.images.image")
     video_path = os.path.join(
                 observation_image_path,
                 file.replace('.parquet', '.mp4')
@@ -168,7 +168,7 @@ for file in onlyfiles:
     #print(episode_dic['stats']['task_index'])
     jsonl_data.append(episode_dic)
 #'''
-file_path = os.path.join(project_root, "datasets/ur5/outputs/meta", "episodes_stats.jsonl")
+file_path = os.path.join(project_root, "mydatasets/ur5/outputs/meta", "episodes_stats.jsonl")
 with open(file_path, 'w') as f:
     for l in jsonl_data:
         f.writelines([json.dumps(l)])

@@ -45,7 +45,7 @@ from huggingface_hub import snapshot_download
 repo_id = 'amylingchen/Robotic_Vision_Laboratory_ur5_v30'
 
 
-local_dir ="datasets/amylingchen/Robotic_Vision_Laboratory_ur5_v30"    
+local_dir ="mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v30"    
 snapshot_download(
     repo_id=repo_id,
     repo_type="dataset",
@@ -61,7 +61,7 @@ snapshot_download(
 ```
 nohup python lerobot/src/lerobot/scripts/lerobot_train.py \
     --dataset.repo_id=amylingchen/Robotic_Vision_Laboratory_ur5_v30 \
-    --dataset.root=./datasets/amylingchen/Robotic_Vision_Laboratory_ur5_v30 \
+    --dataset.root=./mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v30 \
     --policy.type=pi0 \
     --output_dir=./outputs/pi0_training_1 \
     --job_name=pi0_training \

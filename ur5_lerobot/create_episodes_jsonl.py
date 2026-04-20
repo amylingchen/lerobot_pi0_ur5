@@ -3,18 +3,12 @@ import pandas as pd
 import pyarrow.parquet as pq
 import json
 import sys
+
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_root)
+from ur5_lerobot.constant import taskdic
 # 数据目录
-mypath = os.path.join(project_root, "datasets/ur5/outputs/data", "chunk_000")
-
-taskdic = {
-    0: "move the tub near the red cup",
-    1: "move the tub near the blue cup",
-    2: "move the tissue box farther from the orange cup",
-    3: "Move the yellow box to the empty space between the two cubes"
-}
-
+mypath = os.path.join(project_root, "mydatasets/ur5/outputs/data", "chunk_000")
 
 # 只取 .parquet 文件并按数字排序
 onlyfiles = sorted(
@@ -45,7 +39,10 @@ for file in onlyfiles:
     jsonl_data.append(episode_dic)
 
 # 保存 JSONL 文件
-out_path = os.path.join(project_root,"datasets/ur5/outputs/meta", "episodes.jsonl")
+out_dir = os.path.join(project_root,"mydatasets/ur5/outputs/meta")
+os.makedirs(out_dir, exist_ok=True)
+out_path = os.path.join(out_dir, "episodes.jsonl")
+
 with open(out_path, "w") as f:
     for l in jsonl_data:
         f.write(json.dumps(l) + "\n")

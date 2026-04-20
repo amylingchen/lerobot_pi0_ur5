@@ -1,6 +1,6 @@
 ###  上传文件到服务器
 
-scp -i ~/.ssh/{ssh公钥} -r  "/d:{本地文件地址}"  username@server:{project_path}/datasets/ur5/original/
+scp -i ~/.ssh/{ssh公钥} -r  "/d:{本地文件地址}"  username@server:{project_path}/mydatasets/ur5/original/
 
 
 ### 转换文件为lerobot v21格式
@@ -11,7 +11,19 @@ scp -i ~/.ssh/{ssh公钥} -r  "/d:{本地文件地址}"  username@server:{projec
 
 3. 'create_episodes_stats_jsonl.py' 生成 episodes_stats.jsonl
 
-4. 修改 info.json
+4. 修改 info.json，
+    ```
+    "total_episodes": 60,
+    "total_frames": 25560,
+    "total_tasks": 2,
+    "total_videos": 60,
+
+    "splits": {
+        "train": "0:50",
+        "val": "50:61"
+    },
+    ```
+
 
 ### 上传 数据到huggingface
 
@@ -25,7 +37,7 @@ from huggingface_hub import snapshot_download
 repo_id = 'amylingchen/Robotic_Vision_Laboratory_ur5_v21'
 
 # 设置本地缓存路径
-local_dir ="../datasets/amylingchen/Robotic_Vision_Laboratory_ur5_v21"    
+local_dir ="../mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v21"    
 snapshot_download(
     repo_id=repo_id,
     repo_type="dataset",
@@ -36,7 +48,7 @@ snapshot_download(
 )
 ```
 
-2. 将 `dataset/ur5/output`的数据复制到`/datasets/amylingchen/Robotic_Vision_Laboratory_ur5_v21`
+2. 将 `mydatasets/ur5/output`的数据复制到`/mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v21`
 
 3. 上传到huggingface
 
@@ -69,7 +81,7 @@ api.create_tag(
 ```
 python lerobot/src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
     --repo-id amylingchen/Robotic_Vision_Laboratory_ur5_v21 \
-    --root datasets/amylingchen/Robotic_Vision_Laboratory_ur5_v21 \
+    --root mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v21 \
     --push-to-hub False \
     --force-conversion
 ```
@@ -79,7 +91,7 @@ python lerobot/src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
 ```
 repo_id = 'amylingchen/Robotic_Vision_Laboratory_ur5_v30'
 
-local_dir ="../datasets/amylingchen/Robotic_Vision_Laboratory_ur5_v30"  
+local_dir ="../mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v30"  
 
 upload_folder(
     folder_path=local_dir,

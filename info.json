@@ -1,0 +1,111 @@
+{
+    "robot_type": "ur5",
+    "total_episodes": 60,
+    "total_frames": 25560,
+    "total_tasks": 2,
+    "total_videos": 60,
+    "total_chunks": 1,
+    "chunks_size": 1000,
+    "fps": 20,
+    "splits": {
+        "train": "0:45",
+        "val": "45:60"
+    },
+    "data_path": "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet",
+    "video_path": "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4",
+    "features": {
+        "observation.images.image": {
+            "dtype": "video",
+            "shape": [
+                480,
+                480,
+                3
+            ],
+            "names": [
+                "height",
+                "width",
+                "rgb"
+            ],
+            "info": {
+                "video.height": 480,
+                "video.width": 480,
+                "video.codec": "h264",
+                "video.pix_fmt": "yuv420p",
+                "video.is_depth_map": false,
+                "video.fps": 20,
+                "video.channels": 3,
+                "has_audio": false
+            }
+        },
+        "observation.state": {
+            "dtype": "float32",
+            "shape": [
+                8
+            ],
+            "names": {
+                "motors": [
+                    "x",
+                    "y",
+                    "z",
+                    "qx",
+                    "qy",
+                    "qz",
+                    "qw",
+                    "gripper"
+                ]
+            }
+        },
+        "action": {
+            "dtype": "float32",
+            "shape": [
+                7
+            ],
+            "names": {
+                "motors": [
+                    "dx",
+                    "dy",
+                    "dz",
+                    "dRx",
+                    "dRy",
+                    "dRz",
+                    "dGrip"
+                ]
+            }
+        },
+        "timestamp": {
+            "dtype": "float32",
+            "shape": [
+                1
+            ],
+            "names": null
+        },
+        "frame_index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null
+        },
+        "episode_index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null
+        },
+        "index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null
+        },
+        "task_index": {
+            "dtype": "int64",
+            "shape": [
+                1
+            ],
+            "names": null
+        }
+    }
+}

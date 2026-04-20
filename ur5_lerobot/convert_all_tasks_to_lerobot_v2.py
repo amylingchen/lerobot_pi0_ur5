@@ -9,24 +9,42 @@ import imageio
 import cv2
 import random
 import sys
+import tensorflow as tf
 
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.append(project_root)
-vid_H = 480
-vid_W = 640
-CROP_H, CROP_W = 480, 480
+
+from ur5_lerobot.constant import taskdic
+vid_H = 720
+vid_W = 1280
+CROP_H, CROP_W = 720, 720
+RESIZE_H, RESIZE_W = 480, 480
+
 # ============================================================
 #                  基础转换函数
 # ============================================================
 CUR_IDX=0
 
-taskdic = {
-    0: "move the tub near the red cup",
-    1: "move the tub near the blue cup",
-    2: "move the tissue box farther from the orange cup",
-    3: "Move the yellow box to the empty space between the two cubes"
-}
 reverse_taskdic = {v.lower(): k for k, v in taskdic.items()}
+
+
+
+def resize_image(img, resize_size):
+    """
+    Takes numpy array corresponding to a single image and returns resized image as numpy array.
+
+    NOTE (Moo Jin): To make input images in distribution with respect to the inputs seen at training time, we follow
+                    the same resizing scheme used in the Octo dataloader, which OpenVLA uses for training.
+    """
+    assert isinstance(resize_size, tuple)
+    # Resize to image size expected by model
+    img = tf.image.encode_jpeg(img)  # Encode as JPEG, as done in RLDS dataset builder
+    img = tf.io.decode_image(img, expand_animations=False, dtype=tf.uint8)  # Immediately decode back
+    img = tf.image.resize(img, resize_size, method="lanczos3", antialias=True)
+    img = tf.cast(tf.clip_by_value(tf.round(img), 0, 255), tf.uint8)
+    img = img.numpy()
+    return img
+
 
 def load_episode(episode_dir):
     """加载一个 episode 的 npy + json 数据"""
@@ -115,6 +133,7 @@ def images_to_video(obs_dir, save_path, fps=5, drop_last=False):
                 continue
 
             img = center_crop(img, H, W)
+            img = resize_image(img, (RESIZE_H, RESIZE_W))
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
             writer.append_data(img)
@@ -221,7 +240,7 @@ def convert_all_tasks(
 # ============================================================
 
 if __name__ == "__main__":
-    root_dir = os.path.join(project_root, "datasets/ur5/original")
-    output_base = os.path.join(project_root, "datasets/ur5/outputs")
+    root_dir = os.path.join(project_root, "mydatasets/ur5/original")
+    output_base = os.path.join(project_root, "mydatasets/ur5/outputs")
     print(os.getcwd())
     convert_all_tasks(root_dir=root_dir, output_base=output_base)

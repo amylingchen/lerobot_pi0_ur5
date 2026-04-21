@@ -13,7 +13,8 @@ pip install -e ".[pi]"
 
 
 ```
-pip install robosuite==1.4.1 easydict bddl gym tensorflow==2.15.0 timm matplotlib seaborn
+apt update
+apt install -y ffmpeg libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev
 
 ```
 
@@ -32,7 +33,8 @@ python download_model.py lerobot/pi05_base
 
 observation.images.base_0_rgb -> observation.images.image
 
-
+state ->8
+action ->7
 ### Download datasets
 
 ```
@@ -60,13 +62,13 @@ snapshot_download(
 
 ```
 nohup python lerobot/src/lerobot/scripts/lerobot_train.py \
-    --dataset.repo_id=amylingchen/Robotic_Vision_Laboratory_ur5_v30 \
-    --dataset.root=./mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v30 \
+    --dataset.repo_id=amylingchen/rvl_ur5_v30 \
+    --dataset.root=./mydatasets/amylingchen/rvl_ur5_v30 \
     --policy.type=pi0 \
     --output_dir=./outputs/pi0_training_1 \
     --job_name=pi0_training \
     --policy.pretrained_path=./checkpoints/pi0_base \
-    --policy.repo_id=pi0_ur5_rvl \
+    --policy.repo_id=pi0_ur5_rvl_pick \
     --policy.compile_model=false \
     --policy.gradient_checkpointing=true \
     --policy.dtype=bfloat16 \

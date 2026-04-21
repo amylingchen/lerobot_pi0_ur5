@@ -501,7 +501,7 @@ class PaliGemmaWithExpertModel(
         inputs_embeds: list[torch.FloatTensor] | None = None,
         use_cache: bool | None = None,
         adarms_cond: list[torch.Tensor] | None = None,
-        output_attentions:  bool | None = None,
+        output_attentions:  bool | None = False,
     ):
         if adarms_cond is None:
             adarms_cond = [None, None]
@@ -596,6 +596,7 @@ class PaliGemmaWithExpertModel(
             suffix_output = outputs_embeds[1]
             prefix_past_key_values = None
 
+            attentions=suffix_output.attentions if output_attentions else None
         return [prefix_output, suffix_output], prefix_past_key_values, attentions
 
 
@@ -1455,8 +1456,8 @@ class PI0Policy(PreTrainedPolicy):
 
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor],
-                             input_attentions: bool | None = None, 
-                             output_attentions: bool | None = None,
+                             input_attentions: bool | None = False, 
+                             output_attentions: bool | None = False,
                              **kwargs: Unpack[ActionSelectKwargs]) -> Tensor:
         """Predict a chunk of actions given environment observations."""
         self.eval()

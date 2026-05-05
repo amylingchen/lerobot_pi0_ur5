@@ -5,24 +5,13 @@ scp -i ~/.ssh/{ssh公钥} -r  "/d:{本地文件地址}"  username@server:{projec
 
 ### 转换文件为lerobot v21格式
 
-1. 运行 `convert_all_tasks_to_lerobot_v2.py` 生成video和data
-
-2. 'create_episodes_jsonl.py' 生成episodes.jsonl
-
-3. 'create_episodes_stats_jsonl.py' 生成 episodes_stats.jsonl
-
-4. 修改 info.json，
-    ```
-    "total_episodes": 60,
-    "total_frames": 25560,
-    "total_tasks": 2,
-    "total_videos": 60,
-
-    "splits": {
-        "train": "0:50",
-        "val": "50:61"
-    },
-    ```
+python build_lerobot_v21_dataset.py \
+      --original-dir mydatasets/ur5/original \
+      --output-dir mydatasets/ur5/outputs \
+      --task-module ur5_lerobot.constant \
+      --train-ratio 0.75 \
+      --fps 30 \
+      --video-fps 30
 
 
 ### 上传 数据到huggingface
@@ -80,9 +69,9 @@ api.create_tag(
 5. 将v21 转为v30
 ```
 python lerobot/src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
-    --repo-id amylingchen/Robotic_Vision_Laboratory_ur5_v21 \
-    --root mydatasets/amylingchen/Robotic_Vision_Laboratory_ur5_v21 \
-    --push-to-hub False \
+    --repo-id amylingchen/rvl_ur5_task1_1_v30 \
+    --root mydatasets/amylingchen/rvl_ur5_task1_1_v21 \
+    --push-to-hub True \
     --force-conversion
 ```
 

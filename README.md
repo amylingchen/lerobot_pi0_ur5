@@ -2,6 +2,20 @@
 
 [convert data to lerobot ](ur5_lerobot/README.md)
 
+### download project
+
+···
+git clone https://github.com/amylingchen/lerobot_pi0_ur5.git
+···
+
+### install conda and create python 3.12 environment
+wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+bash Miniconda3-latest-Linux-x86_64.sh
+
+source ~/.bashrc
+conda create -n lerobot python=3.12 -y
+conda activate lerobot
+
 # pi0 fintune
 
 ```

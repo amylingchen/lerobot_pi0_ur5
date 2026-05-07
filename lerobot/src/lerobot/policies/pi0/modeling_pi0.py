@@ -1142,11 +1142,11 @@ class PI0Policy(PreTrainedPolicy):
 
             if not missing_keys and not unexpected_keys:
                 print("All keys loaded successfully!")
-            if hasattr(config, "device") and config.device is not None:
-                model = model.to(config.device)
+            
         except Exception as e:
             print(f"Warning: Could not load state dict: {e}")
-
+        if hasattr(config, "device") and config.device is not None:
+            model = model.to(config.device)
         return model
     
     # @classmethod

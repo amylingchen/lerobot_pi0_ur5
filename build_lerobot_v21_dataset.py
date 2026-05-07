@@ -2,6 +2,12 @@
 """
 Build a LeRobot v2.1-style UR5 dataset from raw original episodes.
 
+This version reads raw observation folders obs1/obs2 and saves them as image1/image2 in the output dataset, while explicitly fixing
+state/action/image length mismatches by aligning every episode to the same
+number of frames:
+
+    n_frames = min(states, actions, timestamps if available, obs1 images, obs2 images)
+
 Input layout:
     original/
       task_xxx/
@@ -9,25 +15,31 @@ Input layout:
           states.npy
           actions.npy
           meta.json      # should contain instruction, timestamps, fps
-          obs/           # png/jpg images
+          obs1/          # raw camera/view 1 png/jpg images, no crop/resize
+          obs2/          # raw camera/view 2 png/jpg images, no crop/resize
 
 Output layout:
     outputs/
       data/chunk_000/episode_000000.parquet
-      videos/chunk_000/observation.images.image/episode_000000.mp4
+      videos/chunk_000/observation.images.image1/episode_000000.mp4
+      videos/chunk_000/observation.images.image2/episode_000000.mp4
       meta/episodes.jsonl
       meta/episodes_stats.jsonl
       meta/tasks.jsonl
       meta/info.json
 
 Example:
-    python build_lerobot_v21_dataset.py \
+    python build_lerobot_v21_dataset_two_obs_aligned.py \
       --original-dir mydatasets/ur5/original \
       --output-dir mydatasets/ur5/outputs \
       --task-module ur5_lerobot.constant \
       --train-ratio 0.75 \
       --fps 30 \
-      --video-fps 30
+      --video-fps 30 \
+      --overwrite
+
+Notes:
+    Images are written to video at their original resolution. No crop/resize is applied.
 """
 
 from __future__ import annotations
@@ -35,7 +47,6 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
-import os
 import random
 import re
 import shutil
@@ -48,12 +59,14 @@ import numpy as np
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-from PIL import Image as PILImage
 
 
 # -----------------------------
 # Config / loading helpers
 # -----------------------------
+
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg"}
+
 
 def load_taskdic(task_module: str | None, task_json: str | None) -> dict[int, str]:
     if task_json:
@@ -76,6 +89,9 @@ def natural_episode_number(path: Path) -> int:
 
 
 def collect_episode_paths(original_dir: Path) -> list[Path]:
+    if not original_dir.exists():
+        raise FileNotFoundError(f"original_dir does not exist: {original_dir}")
+
     episode_paths: list[Path] = []
     for task_dir in sorted(original_dir.iterdir()):
         if not task_dir.is_dir() or not task_dir.name.startswith("task_"):
@@ -86,84 +102,149 @@ def collect_episode_paths(original_dir: Path) -> list[Path]:
     return episode_paths
 
 
-# -----------------------------
-# Image / video helpers
-# -----------------------------
+def load_episode_raw(episode_dir: Path) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    states_path = episode_dir / "states.npy"
+    actions_path = episode_dir / "actions.npy"
+    meta_path = episode_dir / "meta.json"
 
-def center_crop(img: np.ndarray, crop_h: int, crop_w: int) -> np.ndarray:
-    h, w = img.shape[:2]
-    if crop_h > h or crop_w > w:
-        raise ValueError(f"Crop size {(crop_h, crop_w)} is larger than image size {(h, w)}")
-    top = (h - crop_h) // 2
-    left = (w - crop_w) // 2
-    return img[top : top + crop_h, left : left + crop_w]
+    if not states_path.exists():
+        raise FileNotFoundError(f"Missing states.npy: {states_path}")
+    if not actions_path.exists():
+        raise FileNotFoundError(f"Missing actions.npy: {actions_path}")
+    if not meta_path.exists():
+        raise FileNotFoundError(f"Missing meta.json: {meta_path}")
 
-
-def resize_image_cv2(img: np.ndarray, resize_h: int, resize_w: int) -> np.ndarray:
-    return cv2.resize(img, (resize_w, resize_h), interpolation=cv2.INTER_LANCZOS4)
-
-
-def list_images(obs_dir: Path) -> list[Path]:
-    images = [p for p in obs_dir.iterdir() if p.suffix.lower() in {".png", ".jpg", ".jpeg"}]
-    return sorted(images, key=natural_episode_number)
-
-
-def images_to_video(
-    obs_dir: Path,
-    save_path: Path,
-    *,
-    fps: int,
-    crop_h: int,
-    crop_w: int,
-    resize_h: int,
-    resize_w: int,
-    drop_last_image: bool,
-) -> int:
-    image_paths = list_images(obs_dir)
-    if not image_paths:
-        raise ValueError(f"No image files found in {obs_dir}")
-    if drop_last_image:
-        image_paths = image_paths[:-1]
-
-    save_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with imageio.get_writer(str(save_path), fps=fps, codec="libx264") as writer:
-        written = 0
-        for image_path in image_paths:
-            img = cv2.imread(str(image_path))
-            if img is None:
-                print(f"⚠️ Skip unreadable image: {image_path}")
-                continue
-            img = center_crop(img, crop_h, crop_w)
-            img = resize_image_cv2(img, resize_h, resize_w)
-            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            writer.append_data(img)
-            written += 1
-    return written
-
-
-# -----------------------------
-# Episode conversion
-# -----------------------------
-
-def load_episode(episode_dir: Path) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
-    states = np.load(episode_dir / "states.npy")
-    actions = np.load(episode_dir / "actions.npy")
-
-    with open(episode_dir / "meta.json", "r", encoding="utf-8") as f:
+    states = np.load(states_path)
+    actions = np.load(actions_path)
+    with open(meta_path, "r", encoding="utf-8") as f:
         meta = json.load(f)
 
-    n_frames = min(len(states), len(actions), len(meta.get("timestamps", [])))
-    states = states[:n_frames]
-    actions = actions[:n_frames]
-    meta["timestamps"] = meta["timestamps"][:n_frames]
-    meta["n_frames"] = n_frames
     return states, actions, meta
 
 
 def extract_task_index(instruction: str, taskdic: dict[int, str], default_task_index: int = 0) -> int:
     reverse = {v.strip().lower(): k for k, v in taskdic.items()}
     return int(reverse.get(instruction.strip().lower(), default_task_index))
+
+
+# -----------------------------
+# Image / video helpers
+# -----------------------------
+
+
+def list_images(obs_dir: Path) -> list[Path]:
+    if not obs_dir.exists():
+        raise FileNotFoundError(f"Observation image folder does not exist: {obs_dir}")
+    images = [p for p in obs_dir.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES]
+    return sorted(images, key=natural_episode_number)
+
+
+def maybe_drop_last(paths: list[Path], drop_last: bool) -> list[Path]:
+    if drop_last and paths:
+        return paths[:-1]
+    return paths
+
+
+def write_images_to_video(
+    image_paths: list[Path],
+    save_path: Path,
+    *,
+    fps: int,
+    max_frames: int,
+) -> int:
+    selected_paths = image_paths[:max_frames]
+    if not selected_paths:
+        raise ValueError(f"No image frames to write for {save_path}")
+
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    written = 0
+    with imageio.get_writer(str(save_path), fps=fps, codec="libx264") as writer:
+        for image_path in selected_paths:
+            img = cv2.imread(str(image_path))
+            if img is None:
+                print(f"⚠️ Skip unreadable image: {image_path}")
+                continue
+
+            # No crop and no resize: keep original image resolution.
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            writer.append_data(img)
+            written += 1
+
+    if written != max_frames:
+        raise ValueError(
+            f"Video frame mismatch for {save_path}: expected {max_frames}, wrote {written}. "
+            "This usually means some image files were unreadable."
+        )
+
+    return written
+
+
+def get_video_frame_count(video_path: Path) -> int:
+    cap = cv2.VideoCapture(str(video_path))
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
+    return frame_count
+
+
+# -----------------------------
+# Frame alignment
+# -----------------------------
+
+
+def prepare_aligned_episode(
+    episode_dir: Path,
+    obs_folders: list[str],
+    *,
+    drop_last_image: bool,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any], dict[str, list[Path]], dict[str, int]]:
+    """Load one episode and align states/actions/timestamps/images by min length."""
+    states, actions, meta = load_episode_raw(episode_dir)
+
+    image_paths_by_folder: dict[str, list[Path]] = {}
+    image_counts: dict[str, int] = {}
+    for obs_folder in obs_folders:
+        paths = list_images(episode_dir / obs_folder)
+        paths = maybe_drop_last(paths, drop_last_image)
+        image_paths_by_folder[obs_folder] = paths
+        image_counts[obs_folder] = len(paths)
+
+    timestamps = meta.get("timestamps", None)
+    has_timestamps = isinstance(timestamps, list) and len(timestamps) > 0
+
+    candidate_lengths = {
+        "states": len(states),
+        "actions": len(actions),
+        **{f"images/{folder}": count for folder, count in image_counts.items()},
+    }
+    if has_timestamps:
+        candidate_lengths["timestamps"] = len(timestamps)
+
+    n_frames = min(candidate_lengths.values())
+    if n_frames <= 0:
+        raise ValueError(f"Invalid aligned frame count {n_frames} in {episode_dir}: {candidate_lengths}")
+
+    if len(set(candidate_lengths.values())) != 1:
+        print(f"⚠️ Length mismatch in {episode_dir}")
+        print(f"   raw lengths: {candidate_lengths}")
+        print(f"   aligned n_frames = {n_frames}")
+
+    states = states[:n_frames]
+    actions = actions[:n_frames]
+
+    if has_timestamps:
+        meta["timestamps"] = timestamps[:n_frames]
+    else:
+        # Fallback: frame ids. make_dataframe will convert them by fps.
+        meta["timestamps"] = list(range(n_frames))
+
+    meta["n_frames"] = n_frames
+    return states, actions, meta, image_paths_by_folder, candidate_lengths
+
+
+# -----------------------------
+# Episode conversion
+# -----------------------------
 
 
 def make_dataframe(
@@ -176,12 +257,16 @@ def make_dataframe(
     start_index: int,
     fps: int,
 ) -> pd.DataFrame:
-    n_frames = min(len(states), len(actions))
+    n_frames = int(meta["n_frames"])
     timestamps = meta.get("timestamps", list(range(n_frames)))[:n_frames]
 
-    # If timestamps are already seconds, use --timestamp-mode seconds.
-    # Default keeps your original behavior: timestamp = t / fps.
-    timestamps_sec = [float(t) / float(fps) for t in timestamps]
+    # Current behavior: timestamp = recorded index / fps.
+    # If your timestamps are already seconds, use --timestamp-mode seconds.
+    timestamp_mode = meta.get("timestamp_mode", "frame_index")
+    if timestamp_mode == "seconds":
+        timestamps_sec = [float(t) for t in timestamps]
+    else:
+        timestamps_sec = [float(t) / float(fps) for t in timestamps]
 
     return pd.DataFrame(
         {
@@ -219,7 +304,7 @@ def convert_all_episodes(args: argparse.Namespace, taskdic: dict[int, str]) -> t
     original_dir = Path(args.original_dir)
     output_dir = Path(args.output_dir)
     data_dir = output_dir / "data" / args.chunk
-    video_dir = output_dir / "videos" / args.chunk / args.video_key
+    video_root = output_dir / "videos" / args.chunk
 
     episode_paths = collect_episode_paths(original_dir)
     if not episode_paths:
@@ -233,9 +318,13 @@ def convert_all_episodes(args: argparse.Namespace, taskdic: dict[int, str]) -> t
     current_global_index = args.start_index
 
     for episode_index, episode_dir in enumerate(episode_paths):
-        states, actions, meta = load_episode(episode_dir)
-        task_index = extract_task_index(meta.get("instruction", ""), taskdic, args.default_task_index)
+        states, actions, meta, image_paths_by_folder, raw_lengths = prepare_aligned_episode(
+            episode_dir,
+            args.obs_folders,
+            drop_last_image=args.drop_last_image,
+        )
 
+        task_index = extract_task_index(meta.get("instruction", ""), taskdic, args.default_task_index)
         episode_fps = int(meta.get("fps", args.fps)) if args.use_meta_fps else args.fps
         video_fps = int(meta.get("fps", args.video_fps)) if args.use_meta_video_fps else args.video_fps
 
@@ -249,29 +338,34 @@ def convert_all_episodes(args: argparse.Namespace, taskdic: dict[int, str]) -> t
             fps=episode_fps,
         )
 
-        parquet_path = data_dir / f"episode_{episode_index:06d}.parquet"
-        video_path = video_dir / f"episode_{episode_index:06d}.mp4"
-        obs_dir = episode_dir / args.obs_folder
-
-        dataframe_to_parquet(df, parquet_path)
-        written_video_frames = images_to_video(
-            obs_dir,
-            video_path,
-            fps=video_fps,
-            crop_h=args.crop_h,
-            crop_w=args.crop_w,
-            resize_h=args.resize_h,
-            resize_w=args.resize_w,
-            drop_last_image=args.drop_last_image,
-        )
-
         n_frames = len(df)
+        parquet_path = data_dir / f"episode_{episode_index:06d}.parquet"
+        dataframe_to_parquet(df, parquet_path)
+
+        written_video_frames: dict[str, int] = {}
+        for obs_folder, video_key in zip(args.obs_folders, args.video_keys):
+            video_path = video_root / video_key / f"episode_{episode_index:06d}.mp4"
+            written_video_frames[video_key] = write_images_to_video(
+                image_paths_by_folder[obs_folder],
+                video_path,
+                fps=video_fps,
+                max_frames=n_frames,
+            )
+
+            if args.validate_video_frames:
+                actual = get_video_frame_count(video_path)
+                if actual != n_frames:
+                    raise ValueError(
+                        f"Encoded video frame mismatch for {video_path}: "
+                        f"parquet={n_frames}, video={actual}"
+                    )
+
         current_global_index += n_frames
         total_frames += n_frames
 
         print(
             f"✅ episode_{episode_index:06d}: task={task_index}, "
-            f"frames={n_frames}, video_frames={written_video_frames}"
+            f"frames={n_frames}, video_frames={written_video_frames}, raw_lengths={raw_lengths}"
         )
 
     return len(episode_paths), total_frames
@@ -280,6 +374,7 @@ def convert_all_episodes(args: argparse.Namespace, taskdic: dict[int, str]) -> t
 # -----------------------------
 # Meta generation
 # -----------------------------
+
 
 def sorted_parquet_files(output_dir: Path, chunk: str) -> list[Path]:
     data_dir = output_dir / "data" / chunk
@@ -362,31 +457,35 @@ def sample_video_frames(video_path: Path) -> np.ndarray:
     return np.stack(frames, axis=0)
 
 
-def create_episodes_stats_jsonl(output_dir: Path, chunk: str, video_key: str) -> None:
+def create_episodes_stats_jsonl(output_dir: Path, chunk: str, video_keys: list[str]) -> None:
     rows = []
     for parquet_path in sorted_parquet_files(output_dir, chunk):
         df = pd.read_parquet(parquet_path)
         episode_index = int(df["episode_index"].iloc[0])
-        video_path = output_dir / "videos" / chunk / video_key / parquet_path.name.replace(".parquet", ".mp4")
 
         row: dict[str, Any] = {"episode_index": episode_index, "stats": {}}
 
-        frames = sample_video_frames(video_path)
-        img_stats = {
-            k: (v if k == "count" else np.squeeze(v / 255.0, axis=0)).tolist()
-            for k, v in {
-                "min": np.min(frames, axis=(0, 2, 3), keepdims=True),
-                "max": np.max(frames, axis=(0, 2, 3), keepdims=True),
-                "mean": np.mean(frames, axis=(0, 2, 3), keepdims=True),
-                "std": np.std(frames, axis=(0, 2, 3), keepdims=True),
-                "count": np.array([len(frames)]),
-            }.items()
-        }
-        # Keep both names for compatibility with old script and feature key.
-        row["stats"]["observation.image"] = img_stats
-        row["stats"]["observation.images.image"] = img_stats
+        for video_key in video_keys:
+            video_path = output_dir / "videos" / chunk / video_key / parquet_path.name.replace(".parquet", ".mp4")
+            frames = sample_video_frames(video_path)
+            img_stats = {
+                k: (v if k == "count" else np.squeeze(v / 255.0, axis=0)).tolist()
+                for k, v in {
+                    "min": np.min(frames, axis=(0, 2, 3), keepdims=True),
+                    "max": np.max(frames, axis=(0, 2, 3), keepdims=True),
+                    "mean": np.mean(frames, axis=(0, 2, 3), keepdims=True),
+                    "std": np.std(frames, axis=(0, 2, 3), keepdims=True),
+                    "count": np.array([len(frames)]),
+                }.items()
+            }
+            row["stats"][video_key] = img_stats
 
-        row["stats"]["observation.state"] = get_feature_stats(np.vstack(df["observation.state"].to_numpy()), axis=0, keepdims=False)
+        if video_keys:
+            row["stats"]["observation.image"] = row["stats"][video_keys[0]]
+
+        row["stats"]["observation.state"] = get_feature_stats(
+            np.vstack(df["observation.state"].to_numpy()), axis=0, keepdims=False
+        )
         row["stats"]["action"] = get_feature_stats(np.vstack(df["action"].to_numpy()), axis=0, keepdims=False)
         for key in ["episode_index", "frame_index", "timestamp", "index", "task_index"]:
             row["stats"][key] = get_feature_stats(df[key].to_numpy(), axis=0, keepdims=True)
@@ -407,8 +506,25 @@ def get_dir_size_mb(path: Path) -> int:
     return int(round(total / (1024 * 1024)))
 
 
+def get_first_video_shape(output_dir: Path, chunk: str, video_key: str) -> tuple[int, int]:
+    video_dir = output_dir / "videos" / chunk / video_key
+    first_video = next(iter(sorted(video_dir.glob("*.mp4"), key=natural_episode_number)), None)
+    if first_video is None:
+        raise ValueError(f"No videos found under {video_dir}")
+
+    cap = cv2.VideoCapture(str(first_video))
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap.release()
+
+    if width <= 0 or height <= 0:
+        raise ValueError(f"Cannot infer video size from {first_video}")
+    return height, width
+
+
 def create_info_json(args: argparse.Namespace, taskdic: dict[int, str], total_episodes: int, total_frames: int) -> None:
     output_dir = Path(args.output_dir)
+    video_shapes = {video_key: get_first_video_shape(output_dir, args.chunk, video_key) for video_key in args.video_keys}
     train_end = int(total_episodes * args.train_ratio)
 
     info = {
@@ -419,43 +535,43 @@ def create_info_json(args: argparse.Namespace, taskdic: dict[int, str], total_ep
         "total_frames": total_frames,
         "total_tasks": len(taskdic),
         "total_chunks": (total_episodes + args.chunks_size - 1) // args.chunks_size,
-        "total_videos": total_episodes,  # 1 video per episode
+        "total_videos": total_episodes * len(args.video_keys),
         "chunks_size": args.chunks_size,
         "fps": args.fps,
         "splits": {
             "train": f"0:{train_end}",
             "val": f"{train_end}:{total_episodes}",
         },
-        # This matches the current v21-style output produced by this script.
         "data_path": f"data/{{episode_chunk:03d}}/episode_{{episode_index:06d}}.parquet",
         "video_path": f"videos/{{episode_chunk:03d}}/{{video_key}}/episode_{{episode_index:06d}}.mp4",
         "features": {
-            args.video_key: {
-                "dtype": "video",
-                "shape": [args.resize_h, args.resize_w, 3],
-                "names": ["height", "width", "rgb"],
-                "info": {
-                    "video.height": args.resize_h,
-                    "video.width": args.resize_w,
-                    "video.codec": "h264",
-                    "video.pix_fmt": "yuv420p",
-                    "video.is_depth_map": False,
-                    "video.fps": args.video_fps,
-                    "video.channels": 3,
-                    "has_audio": False,
-                },
+            **{
+                video_key: {
+                    "dtype": "video",
+                    "shape": [video_shapes[video_key][0], video_shapes[video_key][1], 3],
+                    "names": ["height", "width", "rgb"],
+                    "info": {
+                        "video.height": video_shapes[video_key][0],
+                        "video.width": video_shapes[video_key][1],
+                        "video.codec": "h264",
+                        "video.pix_fmt": "yuv420p",
+                        "video.is_depth_map": False,
+                        "video.fps": args.video_fps,
+                        "video.channels": 3,
+                        "has_audio": False,
+                    },
+                }
+                for video_key in args.video_keys
             },
             "observation.state": {
                 "dtype": "float32",
                 "shape": [args.state_dim],
                 "names": {"motors": args.state_names},
-                # "fps": args.fps,
             },
             "action": {
                 "dtype": "float32",
                 "shape": [args.action_dim],
                 "names": {"motors": args.action_names},
-                # "fps": args.fps,
             },
             "timestamp": {"dtype": "float32", "shape": [1], "names": None},
             "frame_index": {"dtype": "int64", "shape": [1], "names": None},
@@ -478,8 +594,9 @@ def create_info_json(args: argparse.Namespace, taskdic: dict[int, str], total_ep
 # CLI
 # -----------------------------
 
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build UR5 LeRobot v2.1 dataset from original episodes")
+    parser = argparse.ArgumentParser(description="Build aligned UR5 LeRobot v2.1 dataset with two observations")
 
     parser.add_argument("--original-dir", default="mydatasets/ur5/original")
     parser.add_argument("--output-dir", default="mydatasets/ur5/outputs")
@@ -487,22 +604,29 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-json", default=None, help="Optional JSON mapping task_index to instruction")
 
     parser.add_argument("--chunk", default="chunk_000")
-    # parser.add_argument("--chunk_key", default="{episode_chunk:03d}")
-
-    parser.add_argument("--video-key", default="observation.images.image")
-    parser.add_argument("--obs-folder", default="obs")
+    # Input folders are obs1/obs2 by default.
+    # Output video feature keys are image1/image2, so the saved dataset uses image names instead of raw obs names.
+    parser.add_argument("--video-keys", nargs="+", default=["observation.images.image1", "observation.images.image2"])
+    parser.add_argument("--obs-folders", nargs="+", default=["obs1", "obs2"])
     parser.add_argument("--robot-type", default="ur5")
 
-    parser.add_argument("--fps", type=int, default=30, help="Dataset/control FPS used in timestamps and feature metadata")
+    parser.add_argument("--fps", type=int, default=30, help="Dataset/control FPS used in timestamps and metadata")
     parser.add_argument("--video-fps", type=int, default=20, help="Video FPS written to mp4 and info.json")
     parser.add_argument("--use-meta-fps", action="store_true", help="Use meta.json fps for timestamps instead of --fps")
     parser.add_argument("--use-meta-video-fps", action="store_true", help="Use meta.json fps for video instead of --video-fps")
 
-    parser.add_argument("--crop-h", type=int, default=720)
-    parser.add_argument("--crop-w", type=int, default=720)
-    parser.add_argument("--resize-h", type=int, default=480)
-    parser.add_argument("--resize-w", type=int, default=480)
-    parser.add_argument("--drop-last-image", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--drop-last-image",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Drop the last image in each obs folder before length alignment. Use this only if your logger always saves one extra image.",
+    )
+    parser.add_argument(
+        "--validate-video-frames",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Check encoded mp4 frame count equals parquet frame count.",
+    )
 
     parser.add_argument("--state-dim", type=int, default=8)
     parser.add_argument("--action-dim", type=int, default=7)
@@ -521,29 +645,39 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> None:
-    args = parse_args()
-    output_dir = Path(args.output_dir)
-
-    if args.overwrite and output_dir.exists():
-        shutil.rmtree(output_dir)
-
+def validate_args(args: argparse.Namespace) -> None:
+    if len(args.obs_folders) != len(args.video_keys):
+        raise ValueError(f"obs_folders length {len(args.obs_folders)} != video_keys length {len(args.video_keys)}")
     if len(args.state_names) != args.state_dim:
         raise ValueError(f"state_names length {len(args.state_names)} != state_dim {args.state_dim}")
     if len(args.action_names) != args.action_dim:
         raise ValueError(f"action_names length {len(args.action_names)} != action_dim {args.action_dim}")
+    if not 0 < args.train_ratio < 1:
+        raise ValueError(f"train_ratio must be between 0 and 1, got {args.train_ratio}")
+
+
+def main() -> None:
+    args = parse_args()
+    validate_args(args)
+
+    output_dir = Path(args.output_dir)
+    if args.overwrite and output_dir.exists():
+        shutil.rmtree(output_dir)
 
     taskdic = load_taskdic(args.task_module, args.task_json)
 
-    print("🚀 Building LeRobot v2.1 dataset")
+    print("🚀 Building aligned LeRobot v2.1 dataset")
     print(f"original_dir = {args.original_dir}")
     print(f"output_dir   = {args.output_dir}")
+    print(f"obs_folders  = {args.obs_folders}")
+    print(f"video_keys   = {args.video_keys}")
+    print(f"drop_last_image = {args.drop_last_image}")
 
     total_episodes, total_frames = convert_all_episodes(args, taskdic)
     create_episodes_jsonl(output_dir, args.chunk, taskdic)
     create_tasks_jsonl(output_dir, taskdic)
     if not args.skip_stats:
-        create_episodes_stats_jsonl(output_dir, args.chunk, args.video_key)
+        create_episodes_stats_jsonl(output_dir, args.chunk, args.video_keys)
     create_info_json(args, taskdic, total_episodes, total_frames)
 
     print("\n🎉 Done")

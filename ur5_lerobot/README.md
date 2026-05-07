@@ -6,12 +6,12 @@ scp -i ~/.ssh/{ssh公钥} -r  "/d:{本地文件地址}"  username@server:{projec
 ### 转换文件为lerobot v21格式
 
 python build_lerobot_v21_dataset.py \
-      --original-dir mydatasets/ur5/original \
-      --output-dir mydatasets/ur5/outputs \
-      --task-module ur5_lerobot.constant \
-      --train-ratio 0.75 \
-      --fps 30 \
-      --video-fps 30
+    --original-dir mydatasets/ur5/original \
+    --output-dir mydatasets/ur5/outputs \
+    --task-module ur5_lerobot.constant \
+    --train-ratio 0.85 \
+    --fps 20 \
+    --video-fps 20
 
 
 ### 上传 数据到huggingface
@@ -69,8 +69,8 @@ api.create_tag(
 5. 将v21 转为v30
 ```
 python lerobot/src/lerobot/datasets/v30/convert_dataset_v21_to_v30.py \
-    --repo-id amylingchen/rvl_ur5_task1_1_v30 \
-    --root mydatasets/amylingchen/rvl_ur5_task1_1_v21 \
+    --repo-id amylingchen/rvl_ur5_task1_2_v30 \
+    --root mydatasets/amylingchen/rvl_ur5_task1_2_v21 \
     --push-to-hub True \
     --force-conversion
 ```

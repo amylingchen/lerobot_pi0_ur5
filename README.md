@@ -21,7 +21,6 @@ conda activate lerobot
 ```
 cd lerobot
 
-pip install -e .
 pip install -e ".[pi]"
 ```
 
@@ -40,19 +39,23 @@ pip install numpy==1.26.4 pytest
 ### Download the model:
 ```
 cd {this_repo}/checkpoints 
-python download_model.py lerobot/pi05_base
+python download_model.py lerobot/pi0_base
 ```
 
-### update checkpoints/pi05_base/config.json
+### update checkpoints/pi0_base/config.json
 
-observation.images.base_0_rgb -> observation.images.image
+observation.images.base_0_rgb -> observation.images.image1
+observation.images.base_1_rgb -> observation.images.image2
 
 state ->8
 action ->7
 ### Download datasets
 
 ```
+pip install --upgrade huggingface_hub
 
+```
+```
 from huggingface_hub import login
 
 from huggingface_hub import snapshot_download
@@ -76,19 +79,19 @@ snapshot_download(
 
 ```
 nohup python lerobot/src/lerobot/scripts/lerobot_train.py \
-    --dataset.repo_id=amylingchen/rvl_ur5_v30 \
-    --dataset.root=./mydatasets/amylingchen/rvl_ur5_v30 \
+    --dataset.repo_id=amylingchen/rvl_ur5_task1_2_v30 \
+    --dataset.root=./mydatasets/amylingchen/rvl_ur5_task1_2_v30 \
     --policy.type=pi0 \
     --output_dir=./outputs/pi0_training_1 \
     --job_name=pi0_training \
     --policy.pretrained_path=./checkpoints/pi0_base \
-    --policy.repo_id=pi0_ur5_rvl_pick \
-    --policy.compile_model=false \
-    --policy.gradient_checkpointing=true \
+    --policy.repo_id=rvl_ur5_task1_2_pick \
+    --policy.compile_model=true \
+    --policy.gradient_checkpointing=false \
     --policy.dtype=bfloat16 \
-    --steps=200000 \
-    --policy.scheduler_decay_steps=3000 \
+    --steps=100 \
+    --policy.scheduler_decay_steps=5000 \
     --policy.device=cuda \
-    --batch_size=4 \
-    > train.log 2>&1
+    --batch_size=16 \
+    > train_1.log 2>&1
 ```
